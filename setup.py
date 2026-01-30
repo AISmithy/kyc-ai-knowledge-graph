@@ -29,6 +29,8 @@ setup(
         "requests>=2.28.0",
         "pandas>=1.5.0",
         "beautifulsoup4>=4.11.0",
+        "neo4j>=5.0.0",
+        "python-dotenv>=1.0.0",
     ],
     entry_points={
         "console_scripts": [
