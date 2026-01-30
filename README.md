@@ -25,7 +25,15 @@ Ingests GLEIF Level 1 & 2 data → normalizes & validates → persists to Parque
 - **ingest.py**: CSV loader for external data feeds (adverse media, screening)
 - **rag.py**: Context assembly for LLM-based KYC workflows
 
-### 4. Schema
+### 4. LLM-Augmented KYC (`src/`)
+- **graphrag.py**: Graph-augmented LLM reasoning for KYC question answering
+  - `identify_beneficial_owners()` - BO chain analysis + LLM reasoning
+  - `assess_jurisdiction_risk()` - Risk scoring + recommendations
+  - `flag_adverse_media()` - Media aggregation + severity assessment
+  - `comprehensive_kyc_review()` - Full KYC check in single call
+  - Supports Claude 3 (Anthropic) and GPT-4 (OpenAI)
+
+### 5. Schema
 - **schema.cypher**: Constraint and index definitions for AdverseMedia node type
 
 ## Quick Start
@@ -59,7 +67,10 @@ python -m data_loader.main --nrows 1000 --neo4j
 | `jurisdiction_risk_join()` | Flag entities in high-risk jurisdictions |
 | `link_adverse_media()` | Ingest screening records, link to LegalEntity nodes |
 | `assemble_context_for_lei()` | Prepare text context for LLM prompts |
-| `.env.example` | Environment variable template (Neo4j URI, credentials) |
+| `graphrag.comprehensive_kyc_review()` | Run all KYC checks (BO, risk, media) with LLM reasoning |
+| `GraphRAG.identify_beneficial_owners()` | Trace ownership chains, flag control gaps |
+| `GraphRAG.assess_jurisdiction_risk()` | Evaluate AML/CFT exposure |
+| `.env.example` | Environment variable template (Neo4j URI, credentials, LLM keys) |
 
 ## Data Flow
 
@@ -112,6 +123,7 @@ test_mvp_simple.py        # End-to-end validation
 
 - [GLEIF Data](https://www.gleif.org/en/about-lei/get-the-data)
 - [Neo4j Aura](https://neo4j.com/cloud/aura/)
+- [GraphRAG Documentation](docs/GRAPHRAG.md)
 - [MVP Queries](MVP_QUERIES.md)
 - [Implementation Details](MVP_IMPLEMENTATION.md)
 
