@@ -8,6 +8,63 @@ Ingests GLEIF Level 1 & 2 data → normalizes & validates → persists to Parque
 
 ## Architecture
 
+### System Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         KYC Knowledge Graph System                       │
+└─────────────────────────────────────────────────────────────────────────┘
+
+                              GLEIF Data Sources
+                                    │
+                        ┌───────────┴────────────┐
+                        │                        │
+                   Level 1 (7.2GB)         Level 2 (1.0GB)
+                      XML                     XML
+                        │                        │
+                        └───────────┬────────────┘
+                                    │
+                    ┌───────────────▼────────────────┐
+                    │   Data Ingestion Pipeline      │
+                    │  (src/data_loader/)            │
+                    │                                │
+                    │  1. Download & Extract         │
+                    │  2. Stream XML (iterparse)     │
+                    │  3. Normalize & Validate       │
+                    │  4. Persist to Parquet         │
+                    │  5. Load to Neo4j              │
+                    └───────────────┬────────────────┘
+                                    │
+                    ┌───────────────▼────────────────┐
+                    │    Neo4j Aura Instance         │
+                    │   (kyc-graph-01)               │
+                    │                                │
+                    │  • 5 Node Types                │
+                    │  • 6 Edge Types                │
+                    │  • Indices & Constraints       │
+                    └───────────────┬────────────────┘
+                                    │
+        ┌───────────────────────────┼───────────────────────────┐
+        │                           │                           │
+    ┌───▼────────────┐    ┌────────▼─────────┐    ┌───────────▼──┐
+    │ Graph Expansion│    │  External Data   │    │  GraphRAG    │
+    │   (retrieval)  │    │   (CSV ingestion)│    │   (LLM)      │
+    │                │    │                  │    │              │
+    │ • BO Chains    │    │ • Adverse Media  │    │ • Question   │
+    │ • Jurisdiction │    │ • Screening List │    │   Routing    │
+    │   Risk         │    │ • Watchlists     │    │ • LLM Calls  │
+    │ • Risk Scoring │    │                  │    │ • Reasoning  │
+    └────────────────┘    └──────────────────┘    └──────────────┘
+                                    │
+                    ┌───────────────▼────────────────┐
+                    │      KYC Answers & Reports     │
+                    │  • Beneficial Owners           │
+                    │  • Risk Assessment             │
+                    │  • Adverse Media Flags         │
+                    │  • Compliance Recommendations  │
+                    └────────────────────────────────┘
+```
+
 ### 1. Data Ingestion Pipeline (`src/data_loader/`)
 - **downloader.py**: Scrapes GLEIF, downloads & extracts ZIPs
 - **processors.py**: Streaming XML parser (ElementTree.iterparse) for 7+ GB files
@@ -71,6 +128,52 @@ python -m data_loader.main --nrows 1000 --neo4j
 | `GraphRAG.identify_beneficial_owners()` | Trace ownership chains, flag control gaps |
 | `GraphRAG.assess_jurisdiction_risk()` | Evaluate AML/CFT exposure |
 | `.env.example` | Environment variable template (Neo4j URI, credentials, LLM keys) |
+
+## Data Flow Diagram
+
+```
+GLEIF ZIPs (7+ GB)
+     │
+     ▼
+┌─────────────────────────┐
+│  Streaming XML Parser   │    ElementTree.iterparse
+│  (iterparse)            │    → No memory bloat
+└────────┬────────────────┘
+         │
+         ▼
+┌─────────────────────────┐
+│ Normalization & QC      │    • Column mapping
+│                         │    • Type conversion
+│ • Null detection        │    • Deduplication
+│ • Duplicate detection   │    • Referential integrity
+│ • Field validation      │
+└────────┬────────────────┘
+         │
+         ▼
+┌─────────────────────────┐
+│ Parquet Persistence     │    • Snappy compression
+│                         │    • Versioning
+│ • Quality reports JSON  │    • Size: ~500MB (compressed)
+│ • CSV exports           │
+└────────┬────────────────┘
+         │
+         ▼
+┌─────────────────────────┐
+│ Neo4j Batch MERGE       │    • 500 records/transaction
+│                         │    • Idempotent operations
+│ • 5 Node types          │    • Constraint enforcement
+│ • 6 Edge types          │
+│ • Indices created       │
+└────────┬────────────────┘
+         │
+         ▼
+┌─────────────────────────┐
+│ Graph Query Engine      │    • Beneficial ownership chains
+│                         │    • Jurisdiction risk assessment
+│ + LLM Reasoning Layer   │    • Adverse media flagging
+│                         │    • KYC recommendations
+└─────────────────────────┘
+```
 
 ## Data Flow
 
