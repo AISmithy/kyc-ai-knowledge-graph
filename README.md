@@ -1,189 +1,119 @@
 # KYC AI Knowledge Graph
 
-Summary
-- Objective: provide a small, maintainable Python pipeline to download, extract, and normalize GLEIF (Global Legal Entity Identifier Foundation) Level 1 (LEI records) and Level 2 (Relationship Records) data for use in KYC/AML knowledge-graph workflows.
-- Scope: streaming-friendly ingestion for very large GLEIF XML/CSV files, lightweight normalization, and an example join of entities to parent relationships.
+**Build a regulatory-ready knowledge graph from GLEIF data with Neo4j.**
 
-Project highlights
-- Modular layout: configuration (`src/data_loader/config.py`), downloading (`src/data_loader/downloader.py`), processing (`src/data_loader/processors.py`), and orchestration (`src/data_loader/main.py`).
-- Streaming XML support: large GLEIF XML files are parsed via `xml.etree.ElementTree.iterparse` to avoid loading multi-gigabyte files into memory.
-- Output location: generated files are written under the `data/` directory (this directory is ignored by Git by default).
+## What This Does
 
-Quickstart
-1. Create and activate a virtual environment:
+Ingests GLEIF Level 1 & 2 data → normalizes & validates → persists to Parquet → loads into Neo4j Aura. Provides graph expansion queries for beneficial ownership chains, jurisdiction risk scoring, and adverse media linking.
 
-```powershell
+## Architecture
+
+### 1. Data Ingestion Pipeline (`src/data_loader/`)
+- **downloader.py**: Scrapes GLEIF, downloads & extracts ZIPs
+- **processors.py**: Streaming XML parser (ElementTree.iterparse) for 7+ GB files
+- **normalization.py**: Column mapping, type conversion, quality checks, deduplication
+- **persistence.py**: Parquet I/O with versioning and compression
+- **main.py**: 5-stage orchestration (download → load → normalize → persist → neo4j)
+
+### 2. Graph Database (`src/neo4j_module/`)
+- **connector.py**: Connection pooling, encryption handling
+- **schema.py**: Constraints (LEI unique), indices (name, jurisdiction, status)
+- **loader.py**: Batch MERGE operations for entities, addresses, relationships
+
+### 3. Graph Expansion (`src/`)
+- **retrieval.py**: Beneficial ownership traversal, jurisdiction risk joins, adverse media linking
+- **ingest.py**: CSV loader for external data feeds (adverse media, screening)
+- **rag.py**: Context assembly for LLM-based KYC workflows
+
+### 4. Schema
+- **schema.cypher**: Constraint and index definitions for AdverseMedia node type
+
+## Quick Start
+
+```bash
+# Setup
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-```
-
-2. Install dependencies:
-
-```powershell
 pip install -r requirements.txt
+
+# Run MVP test (1000 LEI records)
+python test_mvp_simple.py
+
+# Load data to Neo4j (optional --neo4j flag)
+python -m data_loader.main --nrows 1000 --neo4j
 ```
 
-3. Run the pipeline (downloads latest GLEIF concatenated files, extracts, and runs a preview normalization):
+## Design Principles
 
-```powershell
-cd src\data_loader
-python -m data_loader.main
-```
+- **Streaming First**: Use iterparse for multi-GB files without memory bloat
+- **Batch Processing**: Neo4j MERGE ops use 500-record transactions
+- **Quality Gates**: Normalization tracks nulls, duplicates, referential integrity
+- **Versioning**: Parquet outputs timestamped, quality reports JSON-exported
+- **Deterministic Queries**: Graph expansion uses explicit thresholds (e.g., >25% ownership)
 
-Or after installing the package in editable mode:
+## Key Features
 
-```powershell
-pip install -e .
-gleif-loader
-```
+| Component | Purpose |
+|-----------|---------|
+| `traverse_beneficial_ownership_chain()` | Follow PARENT_OF relationships above control threshold |
+| `jurisdiction_risk_join()` | Flag entities in high-risk jurisdictions |
+| `link_adverse_media()` | Ingest screening records, link to LegalEntity nodes |
+| `assemble_context_for_lei()` | Prepare text context for LLM prompts |
+| `.env.example` | Environment variable template (Neo4j URI, credentials) |
 
-What the pipeline does
-- Scrapes the GLEIF detail page to find current concatenated-file download URLs.
-- Downloads Level 1 and Level 2 ZIPs, extracts them to `data/gleif_downloads/`.
-- Selects the largest data file in each package and performs a streaming preview (defaults: 50k LEI rows, 200k RR rows).
-- Normalizes common columns (LEI, legal name, status; relationship start/end, type, status) and demonstrates a left-join of entities to parent relationships.
-
-Notes & Next steps
-- Relationship Records (RR) can vary in structure; the code includes a fallback when direct start/end LEI columns are not present. I can add more robust RR parsing (node traversal) on request.
-- For production use, I recommend adding a streaming XML→Parquet writer to persist records without holding them in memory.
-- Consider adding CLI flags for `--nrows`, `--out-format` (csv/parquet), and `--extract-only`.
-
-Project layout
+## Data Flow
 
 ```
-src/data_loader/
-  ├─ __init__.py
-  ├─ config.py         # paths and constants
-  ├─ downloader.py     # scraping, downloading, extracting
-  ├─ processors.py     # streaming parsing and normalization
-  └─ main.py           # orchestration and CLI entrypoint
-
-data/                 # generated data output (ignored by Git)
-requirements.txt      # dependencies
-setup.py / pyproject.toml
-.gitignore
-```
-
-Commands to stop tracking existing `data/` in Git (if already committed)
-
-```powershell
-git rm -r --cached data
-git commit -m "Stop tracking data/ directory"
-```
-
-If you want, I can:
-- Add a streaming XML→Parquet writer and an option to output full datasets as Parquet files.
-- Improve RR parsing to extract parent/child relationships from nested nodes.
-- Add CLI flags and unit tests.
-
-License: MIT
-
-A Python project for loading and processing GLEIF (Global Legal Entity Identifier Foundation) data for KYC (Know Your Customer) AI knowledge graph applications.
-
-## Features
-
-- Download latest GLEIF Level 1 (LEI records) and Level 2 (Relationship Records) data
-- Automatic extraction and normalization of GLEIF datasets
-- Column mapping for flexible GLEIF data format versions
-- Join entity records with relationship information
-- Output data organized in the `data/` directory
-
-## Installation
-
-### Using pip (development mode)
-
-```bash
-pip install -e .
-```
-
-Or install with dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-## Usage
-
-### As a command-line tool
-
-Once installed, you can run the GLEIF loader:
-
-```bash
-gleif-loader
-```
-
-### As a Python module
-
-```python
-from data_loader.main import main
-
-lei_df, rr_df, joined_df = main()
-```
-
-### Individual components
-
-```python
-from data_loader.downloader import download_and_extract_gleif_data
-from data_loader.processors import load_and_normalize_lei_data, load_and_normalize_rr_data
-
-# Download and extract
-lei_csv, rr_csv = download_and_extract_gleif_data(...)
-
-# Load data
-lei_df = load_and_normalize_lei_data(lei_csv)
-rr_df = load_and_normalize_rr_data(rr_csv)
+GLEIF ZIPs
+   ↓
+XML streaming (iterparse)
+   ↓
+Normalize + QC (nulls, duplicates, types)
+   ↓
+Parquet persistence (snappy compression)
+   ↓
+Neo4j batch MERGE (500 records/txn)
+   ↓
+Graph queries (BO chains, risk scores, BO flags)
 ```
 
 ## Project Structure
 
 ```
-kyc-ai-knowledge-graph/
-├── src/
-│   └── data_loader/              # Main package
-│       ├── __init__.py
-│       ├── config.py             # Configuration and constants
-│       ├── downloader.py         # Download and extraction logic
-│       ├── processors.py         # Data loading and normalization
-│       └── main.py               # Pipeline orchestration
-├── data/                         # Generated data output directory
-│   └── gleif_downloads/          # Downloaded and extracted GLEIF files
-├── requirements.txt              # Python dependencies
-├── setup.py                      # Package setup configuration
-├── pyproject.toml               # Modern Python project configuration
-├── README.md                     # This file
-└── .gitignore                   # Git ignore rules
+src/
+├── data_loader/           # Ingestion & normalization
+│   ├── config.py
+│   ├── downloader.py
+│   ├── processors.py
+│   ├── normalization.py   # Quality checks & mapping
+│   ├── persistence.py     # Parquet I/O
+│   └── main.py
+├── neo4j_module/          # Graph database
+│   ├── connector.py
+│   ├── schema.py
+│   └── loader.py
+├── retrieval.py           # Graph expansion
+├── ingest.py              # External data ingestion
+└── rag.py                 # Context assembly
+
+schema.cypher             # Neo4j constraint/index definitions
+.env.example              # Environment template
+test_mvp_simple.py        # End-to-end validation
 ```
 
-## Configuration
+## MVP Validation
 
-All configuration is centralized in `src/data_loader/config.py`:
+- ✅ 1000 LEI records normalized and persisted to Parquet
+- ✅ 1000 LegalEntity nodes inserted into Neo4j Aura
+- ✅ Query performance: <100ms on 1000 nodes
+- ✅ Schema constraints and indices verified
 
-- `DATA_DIR`: Output directory for generated data (defaults to `data/`)
-- `DOWNLOADS_DIR`: Directory for downloaded ZIP files
-- `LEI_EXTRACT_DIR`: Directory for extracted Level 1 data
-- `RR_EXTRACT_DIR`: Directory for extracted Level 2 data
-- `LEI_PREVIEW_ROWS`: Number of LEI rows to load (default: 50,000)
-- `RR_PREVIEW_ROWS`: Number of relationship rows to load (default: 200,000)
+## References
 
-## Requirements
-
-- Python 3.8+
-- requests
-- pandas
-- beautifulsoup4
-
-## Development
-
-To set up a development environment:
-
-```bash
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install in development mode
-pip install -e .
-```
+- [GLEIF Data](https://www.gleif.org/en/about-lei/get-the-data)
+- [Neo4j Aura](https://neo4j.com/cloud/aura/)
+- [MVP Queries](MVP_QUERIES.md)
+- [Implementation Details](MVP_IMPLEMENTATION.md)
 
 ## License
 
